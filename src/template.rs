@@ -8,7 +8,6 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::slice;
-use ValueFormatter;
 
 /// Enum defining the different kinds of records on the context stack.
 enum ContextElement<'render, 'template> {
@@ -126,13 +125,16 @@ impl<'template> Template<'template> {
     }
 
     /// Render this template into a string and return it (or any error if one is encountered).
-    pub fn render(
+    pub fn render<VF>(
         &self,
         context: &Value,
         template_registry: &HashMap<&str, Template>,
-        formatter_registry: &HashMap<&str, Box<ValueFormatter>>,
-        default_formatter: &ValueFormatter,
-    ) -> Result<String> {
+        formatter_registry: &HashMap<&str, Box<VF>>,
+        default_formatter: &VF,
+    ) -> Result<String>
+    where
+        VF: ?Sized + Fn(&Value, &mut String) -> Result<()>,
+    {
         // The length of the original template seems like a reasonable guess at the length of the
         // output.
         let mut output = String::with_capacity(self.template_len);
@@ -147,14 +149,17 @@ impl<'template> Template<'template> {
     }
 
     /// Render this template into a given string. Used for calling other templates.
-    pub fn render_into(
+    pub fn render_into<VF>(
         &self,
         context: &Value,
         template_registry: &HashMap<&str, Template>,
-        formatter_registry: &HashMap<&str, Box<ValueFormatter>>,
-        default_formatter: &ValueFormatter,
+        formatter_registry: &HashMap<&str, Box<VF>>,
+        default_formatter: &VF,
         output: &mut String,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        VF: ?Sized + Fn(&Value, &mut String) -> Result<()>,
+    {
         let mut program_counter = 0;
         let mut render_context = RenderContext {
             original_text: self.original_text,
@@ -346,6 +351,7 @@ impl<'template> Template<'template> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::ValueFormatter;
     use compiler::TemplateCompiler;
 
     fn compile(text: &'static str) -> Template<'static> {

@@ -71,16 +71,16 @@ extern crate serde_derive;
 
 mod compiler;
 pub mod error;
+mod generic;
 mod instruction;
+pub mod sync;
 pub mod syntax;
 mod template;
 
 use error::*;
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::fmt::Write;
-use template::Template;
 
 /// Type alias for closures which can be used as value formatters.
 pub type ValueFormatter = dyn Fn(&Value, &mut String) -> Result<()>;
@@ -163,32 +163,20 @@ pub fn format_unescaped(value: &Value, output: &mut String) -> Result<()> {
     }
 }
 
-/// The TinyTemplate struct is the entry point for the TinyTemplate library. It contains the
-/// template and formatter registries and provides functions to render templates as well as to
-/// register templates and formatters.
-pub struct TinyTemplate<'template> {
-    templates: HashMap<&'template str, Template<'template>>,
-    formatters: HashMap<&'template str, Box<ValueFormatter>>,
-    default_formatter: &'template ValueFormatter,
-}
+pub struct TinyTemplate<'template>(generic::TinyTemplate<'template, ValueFormatter>);
+
 impl<'template> TinyTemplate<'template> {
     /// Create a new TinyTemplate registry. The returned registry contains no templates, and has
     /// [`format_unescaped`](fn.format_unescaped.html) registered as a formatter named "unescaped".
     pub fn new() -> TinyTemplate<'template> {
-        let mut tt = TinyTemplate {
-            templates: HashMap::default(),
-            formatters: HashMap::default(),
-            default_formatter: &format,
-        };
+        let mut tt = TinyTemplate(generic::TinyTemplate::new(&format));
         tt.add_formatter("unescaped", format_unescaped);
         tt
     }
 
     /// Parse and compile the given template, then register it under the given name.
     pub fn add_template(&mut self, name: &'template str, text: &'template str) -> Result<()> {
-        let template = Template::compile(text)?;
-        self.templates.insert(name, template);
-        Ok(())
+        self.0.add_template(name, text)
     }
 
     /// Changes the default formatter from [`format`](fn.format.html) to `formatter`. Usefull in combination with [`format_unescaped`](fn.format_unescaped.html) to deactivate HTML-escaping
@@ -196,7 +184,7 @@ impl<'template> TinyTemplate<'template> {
     where
         F: 'static + Fn(&Value, &mut String) -> Result<()>,
     {
-        self.default_formatter = formatter;
+        self.0.set_default_formatter(formatter);
     }
 
     /// Register the given formatter function under the given name.
@@ -204,7 +192,7 @@ impl<'template> TinyTemplate<'template> {
     where
         F: 'static + Fn(&Value, &mut String) -> Result<()>,
     {
-        self.formatters.insert(name, Box::new(formatter));
+        self.0.add_formatter(name, Box::new(formatter));
     }
 
     /// Render the template with the given name using the given context object. The context
@@ -213,18 +201,7 @@ impl<'template> TinyTemplate<'template> {
     where
         C: Serialize,
     {
-        let value = serde_json::to_value(context)?;
-        match self.templates.get(template) {
-            Some(tmpl) => tmpl.render(
-                &value,
-                &self.templates,
-                &self.formatters,
-                self.default_formatter,
-            ),
-            None => Err(Error::GenericError {
-                msg: format!("Unknown template '{}'", template),
-            }),
-        }
+        self.0.render::<C>(template, context)
     }
 }
 impl<'template> Default for TinyTemplate<'template> {
